@@ -1,7 +1,6 @@
-// server/src/app.js
 const path = require('path');
 
-// ---- ENV ----
+// .env가 리포 루트에 있을 때는 이 설정 유지
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const express = require('express');
@@ -19,23 +18,19 @@ const nodemailer = require('nodemailer');
 const { createWorker } = require('tesseract.js');
 const crypto = require('crypto');
 
-// ====== 경로 기본값 ======
-const PROJECT_ROOT = path.join(__dirname, '..', '..');
-const PUBLIC_DIR   = path.join(PROJECT_ROOT, 'public');
-const PAGES_DIR    = path.join(PUBLIC_DIR, 'pages');
-const UPLOADS_DIR  = path.join(PROJECT_ROOT, 'uploads');
+const REPO_ROOT  = path.join(__dirname, '..');
+const PUBLIC_DIR = path.join(REPO_ROOT, 'public');
+const PAGES_DIR  = path.join(PUBLIC_DIR, 'pages');
+const UPLOADS_DIR = path.join(REPO_ROOT, 'uploads');
 
-// ====== MongoDB 모델 / 미들웨어 ======
-const Like              = require(path.join(PROJECT_ROOT, 'models', 'Like'));
-const Report            = require(path.join(PROJECT_ROOT, 'models', 'report'));
-const User              = require(path.join(PROJECT_ROOT, 'models', 'User'));
-const Comment           = require(path.join(PROJECT_ROOT, 'models', 'Comment'));
-const JobDescription    = require(path.join(PROJECT_ROOT, 'models', 'JobDescription'));
-const EmailVerification = require(path.join(PROJECT_ROOT, 'models', 'EmailVerification'));
-const CharacterName     = require(path.join(PROJECT_ROOT, 'models', 'CharacterName'));
-const { authenticateToken, isAdmin } =
-  require(path.join(PROJECT_ROOT, 'middleware', 'authMiddleware'));
-
+const Like              = require('./models/Like');
+const Report            = require('./models/report');           // 파일명이 report.js면 소문자로 바꾸세요.
+const User              = require('./models/User');
+const Comment           = require('./models/Comment');
+const JobDescription    = require('./models/JobDescription');
+const EmailVerification = require('./models/EmailVerification');
+const CharacterName     = require('./models/CharacterName');
+const { authenticateToken, isAdmin } =  require('./middleware/authMiddleware');
 const app = express();
 
 // ---- 기본 미들웨어 ----
@@ -533,7 +528,7 @@ app.use((req, res) => {
 });
 
 // ====== 부팅 시퀀스 (연결 후 서버 시작) ======
-const PORT = process.env.PORT || 2701;
+const PORT = process.env.PORT || 3000;
 
 async function bootstrap() {
   try {
