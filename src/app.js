@@ -1,6 +1,5 @@
 const path = require('path');
 
-// .env가 리포 루트에 있을 때는 이 설정 유지
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const express = require('express');
@@ -24,7 +23,7 @@ const PAGES_DIR  = path.join(PUBLIC_DIR, 'pages');
 const UPLOADS_DIR = path.join(REPO_ROOT, 'uploads');
 
 const Like              = require('./models/Like');
-const Report            = require('./models/report');           // 파일명이 report.js면 소문자로 바꾸세요.
+const Report            = require('./models/report');
 const User              = require('./models/User');
 const Comment           = require('./models/Comment');
 const JobDescription    = require('./models/JobDescription');
@@ -227,6 +226,28 @@ app.post('/api/login', async (req, res) => {
   } catch (error) {
     console.error('Error during login:', error);
     res.status(500).json({ error: 'Server error during login' });
+  }
+});
+
+// 비밀번호 변경 (이메일 + 새 비번)
+app.post('/api/update-password', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password || password.length < 6) {
+      return res.status(400).json({ error: '유효한 email과 6자 이상 password가 필요합니다.' });
+    }
+
+    const user = await User.findOne({ email }).exec();
+    if (!user) return res.status(404).json({ error: '해당 이메일의 사용자 없음' });
+
+    const hashed = await bcrypt.hash(password, 10);
+    user.password = hashed;
+    await user.save();
+
+    return res.json({ message: '비밀번호가 재설정되었습니다.' });
+  } catch (e) {
+    console.error('Error updating password:', e);
+    return res.status(500).json({ error: '비밀번호 재설정 중 서버 오류' });
   }
 });
 
