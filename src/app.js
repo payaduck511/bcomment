@@ -251,6 +251,44 @@ app.post('/api/update-password', async (req, res) => {
   }
 });
 
+// 아이디 중복 체크
+app.post('/api/check-username', async (req, res) => {
+  try {
+    const username = (req.body?.username || '').trim();
+    if (!username || username.length < 4) {
+      return res.status(400).json({ error: '아이디는 최소 4자 이상이어야 합니다.' });
+    }
+
+    const exists = await User.exists({ username });
+    if (exists) {
+      return res.status(409).json({ available: false, message: '이미 사용 중인 아이디입니다.' });
+    }
+    return res.status(200).json({ available: true, message: '사용 가능한 아이디입니다.' });
+  } catch (e) {
+    console.error('[check-username] error:', e);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// 닉네임 중복 체크
+app.post('/api/check-nickname', async (req, res) => {
+  try {
+    const nickname = (req.body?.nickname || '').trim();
+    if (!nickname || nickname.length < 2) {
+      return res.status(400).json({ error: '닉네임은 최소 2자 이상이어야 합니다.' });
+    }
+
+    const exists = await User.exists({ nickname });
+    if (exists) {
+      return res.status(409).json({ available: false, message: '이미 사용 중인 닉네임입니다.' });
+    }
+    return res.status(200).json({ available: true, message: '사용 가능한 닉네임입니다.' });
+  } catch (e) {
+    console.error('[check-nickname] error:', e);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // ====== 댓글 관련 ======
 app.post('/api/comments', authenticateToken, async (req, res) => {
   const { character_id, content } = req.body;
@@ -513,7 +551,7 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(PAGES_DIR, 'index.html'));
 });
 
-// ✅ 페이지 폴백 라우팅 (API/정적 제외, 하위 폴더 지원)
+
 app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
   let rel = req.path.replace(/^\//, ''); // '' | 'login' | 'auth/login'
   if (!rel) rel = 'index.html';
@@ -525,7 +563,7 @@ app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
   if (!full.startsWith(PAGES_DIR)) return res.status(400).send('Bad Request');
 
   fs.access(full, fs.constants.F_OK, (err) => {
-    if (err) return next(); // 없으면 404 핸들러
+    if (err) return next();
     res.sendFile(full);
   });
 });
@@ -533,7 +571,7 @@ app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
 // Health check
 app.get('/health', (_req, res) => {
   res.json({
-    mongo: mongoose.connection.readyState, // 1이면 connected
+    mongo: mongoose.connection.readyState,
     uptime: process.uptime(),
   });
 });
