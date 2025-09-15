@@ -16,8 +16,6 @@ const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
 const { createWorker } = require('tesseract.js');
 const crypto = require('crypto');
-const http = require('http');
-const { Server } = require('socket.io');
 
 const REPO_ROOT  = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(REPO_ROOT, 'public');
@@ -33,12 +31,6 @@ const EmailVerification = require('./models/EmailVerification');
 const CharacterName     = require('./models/CharacterName');
 const { authenticateToken, isAdmin } =  require('./middleware/authMiddleware');
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*', credentials: true }
-});
-
-const LiveChat = require('./models/LiveChat');
 
 // ---- 기본 미들웨어 ----
 app.use(cors());
@@ -559,8 +551,9 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(PAGES_DIR, 'index.html'));
 });
 
+
 app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
-  let rel = req.path.replace(/^\//, '');
+  let rel = req.path.replace(/^\//, ''); // '' | 'login' | 'auth/login'
   if (!rel) rel = 'index.html';
   else if (!path.extname(rel)) rel += '.html';
 
@@ -621,7 +614,8 @@ async function bootstrap() {
         console.error('추천 수 초기화 및 댓글 삭제 중 오류 발생:', error);
       }
     });
-    server.listen(PORT, () => console.log(`✅ Server + Socket.IO running → http://localhost:${PORT}`));
+
+    app.listen(PORT, () => console.log(`✅ Server running → http://localhost:${PORT}`));
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
     process.exit(1);
@@ -644,46 +638,3 @@ function gracefulShutdown() {
 }
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
-
-// JWT 인증
-io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  if (!token) return next(new Error('NO_TOKEN'));
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    socket.user = { id: payload.id, nickname: payload.nickname };
-    next();
-  } catch {
-    next(new Error('INVALID_TOKEN'));
-  }
-});
-
-// 연결/메시지/종료
-io.on('connection', (socket) => {
-  console.log('✅ connected:', socket.user.nickname);
-
-  socket.on('join', (room = 'lobby') => {
-    socket.join(room);
-    socket.emit('joined', { room, nickname: socket.user.nickname });
-  });
-
-  socket.on('chat:message', async ({ room = 'lobby', text }) => {
-    const msg = {
-      room,
-      userId: socket.user.id,
-      nickname: socket.user.nickname,
-      text: (text || '').slice(0, 500),
-      createdAt: new Date()
-    };
-    try {
-      await LiveChat.create(msg);
-    } catch (e) {
-      console.error('LiveChat 저장 오류:', e?.message || e);
-    }
-    io.to(room).emit('chat:message', msg);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ disconnected:', socket.user.nickname);
-  });
-});
