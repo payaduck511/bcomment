@@ -32,17 +32,12 @@ const JobDescription    = require('./models/JobDescription');
 const EmailVerification = require('./models/EmailVerification');
 const CharacterName     = require('./models/CharacterName');
 const { authenticateToken, isAdmin } =  require('./middleware/authMiddleware');
-
 const app = express();
-
-// ✅ Socket.IO용 서버 생성
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', credentials: true }
 });
 
-// ✅ 실시간 채팅 메시지 저장 모델(추가 필요)
-//    ./models/LiveChat.js 파일을 아래에 안내한 대로 생성해줘.
 const LiveChat = require('./models/LiveChat');
 
 // ---- 기본 미들웨어 ----
@@ -565,7 +560,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
-  let rel = req.path.replace(/^\//, ''); // '' | 'login' | 'auth/login'
+  let rel = req.path.replace(/^\//, '');
   if (!rel) rel = 'index.html';
   else if (!path.extname(rel)) rel += '.html';
 
@@ -626,8 +621,6 @@ async function bootstrap() {
         console.error('추천 수 초기화 및 댓글 삭제 중 오류 발생:', error);
       }
     });
-
-    // ✅ 변경: app.listen → server.listen (Socket.IO 동작)
     server.listen(PORT, () => console.log(`✅ Server + Socket.IO running → http://localhost:${PORT}`));
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
@@ -651,10 +644,6 @@ function gracefulShutdown() {
 }
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
-
-// ==========================================================
-// ✅ Socket.IO 이벤트(맨 아래 배치해도 OK)
-// ==========================================================
 
 // JWT 인증
 io.use((socket, next) => {
