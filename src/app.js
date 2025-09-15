@@ -16,6 +16,8 @@ const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
 const { createWorker } = require('tesseract.js');
 const crypto = require('crypto');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const REPO_ROOT  = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(REPO_ROOT, 'public');
@@ -30,7 +32,18 @@ const JobDescription    = require('./models/JobDescription');
 const EmailVerification = require('./models/EmailVerification');
 const CharacterName     = require('./models/CharacterName');
 const { authenticateToken, isAdmin } =  require('./middleware/authMiddleware');
+
 const app = express();
+
+// ✅ Socket.IO용 서버 생성
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: '*', credentials: true }
+});
+
+// ✅ 실시간 채팅 메시지 저장 모델(추가 필요)
+//    ./models/LiveChat.js 파일을 아래에 안내한 대로 생성해줘.
+const LiveChat = require('./models/LiveChat');
 
 // ---- 기본 미들웨어 ----
 app.use(cors());
@@ -551,7 +564,6 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(PAGES_DIR, 'index.html'));
 });
 
-
 app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
   let rel = req.path.replace(/^\//, ''); // '' | 'login' | 'auth/login'
   if (!rel) rel = 'index.html';
@@ -615,7 +627,8 @@ async function bootstrap() {
       }
     });
 
-    app.listen(PORT, () => console.log(`✅ Server running → http://localhost:${PORT}`));
+    // ✅ 변경: app.listen → server.listen (Socket.IO 동작)
+    server.listen(PORT, () => console.log(`✅ Server + Socket.IO running → http://localhost:${PORT}`));
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
     process.exit(1);
@@ -638,3 +651,50 @@ function gracefulShutdown() {
 }
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
+
+// ==========================================================
+// ✅ Socket.IO 이벤트(맨 아래 배치해도 OK)
+// ==========================================================
+
+// JWT 인증
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error('NO_TOKEN'));
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    socket.user = { id: payload.id, nickname: payload.nickname };
+    next();
+  } catch {
+    next(new Error('INVALID_TOKEN'));
+  }
+});
+
+// 연결/메시지/종료
+io.on('connection', (socket) => {
+  console.log('✅ connected:', socket.user.nickname);
+
+  socket.on('join', (room = 'lobby') => {
+    socket.join(room);
+    socket.emit('joined', { room, nickname: socket.user.nickname });
+  });
+
+  socket.on('chat:message', async ({ room = 'lobby', text }) => {
+    const msg = {
+      room,
+      userId: socket.user.id,
+      nickname: socket.user.nickname,
+      text: (text || '').slice(0, 500),
+      createdAt: new Date()
+    };
+    try {
+      await LiveChat.create(msg);
+    } catch (e) {
+      console.error('LiveChat 저장 오류:', e?.message || e);
+    }
+    io.to(room).emit('chat:message', msg);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('❌ disconnected:', socket.user.nickname);
+  });
+});
