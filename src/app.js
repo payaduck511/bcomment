@@ -207,6 +207,45 @@ app.post('/api/verify-reset-code', async (req, res) => {
   }
 });
 
+async function bootstrap() {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
+    console.log('MongoDB connected');
+
+    console.log('Attempting to verify SMTP connection...');
+    try {
+      await transporter.verify();
+      console.log('✅ SMTP server is ready to take messages');
+    } catch (error) {
+      console.error('❌ SMTP connection error:', error);
+    }
+
+    cron.schedule('0 0 * * 4', async () => {
+      try {
+        console.log('추천 수 초기화 및 추천 수 0인 댓글 삭제 작업 시작');
+        await Comment.deleteMany({ likes: 0 });
+        await Comment.updateMany({}, { likes: 0 });
+        await Like.deleteMany({});
+        console.log('추천 수 초기화 완료 및 추천 수 0인 댓글 삭제 완료');
+      } catch (error) {
+        console.error('추천 수 초기화 및 댓글 삭제 중 오류 발생:', error);
+      }
+    });
+
+    app.listen(PORT, () => console.log(`✅ Server running → http://localhost:${PORT}`));
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message);
+    process.exit(1);
+  }
+
+  mongoose.connection.on('error', (e) => console.error('Mongo connection error:', e));
+  mongoose.connection.on('disconnected', () => console.warn('Mongo disconnected'));
+}
+
+bootstrap();
+
 // 로그인
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
@@ -288,6 +327,7 @@ app.post('/api/check-nickname', async (req, res) => {
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
+
 
 // ====== 댓글 관련 ======
 app.post('/api/comments', authenticateToken, async (req, res) => {
