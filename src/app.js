@@ -1,3 +1,4 @@
+// app.js
 const path = require('path');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
@@ -30,6 +31,7 @@ const JobDescription    = require('./models/JobDescription');
 const EmailVerification = require('./models/EmailVerification');
 const CharacterName     = require('./models/CharacterName');
 const { authenticateToken, isAdmin } =  require('./middleware/authMiddleware');
+
 const app = express();
 
 // ---- 기본 미들웨어 ----
@@ -45,12 +47,35 @@ app.use('/pages', express.static(PAGES_DIR));
 const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 // ---- 메일러 ----
+// 환경변수 유효성 힌트(로그에 누락된 키 경고)
+['GMAIL_USER','GMAIL_APP_PASSWORD','MONGO_URI','JWT_SECRET','NEXON_API_KEY'].forEach(k=>{
+  if (!process.env[k]) console.warn(`[ENV WARN] ${k} is MISSING`);
+});
+
+// Render에서 25포트는 막혀있으므로 465(secure) 또는 587(STARTTLS) 사용
+const SMTP_HOST   = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT   = Number(process.env.SMTP_PORT || 465); // 465 추천
+const SMTP_SECURE = (process.env.SMTP_SECURE ?? '') !== ''
+  ? String(process.env.SMTP_SECURE) === 'true'
+  : SMTP_PORT === 465; // 465면 true, 587이면 false
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_SECURE,
   auth: {
     user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
-  }
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+  // 콜드스타트/네고 지연 대비 (프론트 AbortError 완화)
+  connectionTimeout: 15000,
+  greetingTimeout:   15000,
+  socketTimeout:     20000,
+  tls: {
+    // 일부 호스팅 환경 인증서 잡음 회피(필요 없으면 제거 가능)
+    rejectUnauthorized: false,
+    ciphers: 'TLSv1.2',
+  },
 });
 
 // ====== 업로드/OCR ======
@@ -161,30 +186,46 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// 이메일 인증/검증
+// 이메일 인증/검증 (개선: async/await, 상세 에러 로그, Date 객체 저장)
 app.post('/api/send-verification-code', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
   try {
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
     const mailOptions = {
+      // Gmail 정책상 로그인 계정과 동일하게
       from: process.env.GMAIL_USER,
-      to: email,
+      to: String(email).trim(),
       subject: 'Email Verification Code',
       text: `Your verification code is: ${verificationCode}`,
     };
-    transporter.sendMail(mailOptions, async (error) => {
-      if (error) {
-        console.error('Error sending email:', error);
-        return res.status(500).json({ error: 'Failed to send verification code' });
-      }
+
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log('[SMTP SEND OK]', info.messageId);
+
       await EmailVerification.updateOne(
-        { email },
-        { $set: { verificationCode, verificationExpires: Date.now() + 600000 } },
+        { email: mailOptions.to },
+        { $set: { verificationCode, verificationExpires: new Date(Date.now() + 10 * 60 * 1000) } },
         { upsert: true }
       );
-      res.json({ message: 'Verification code sent successfully' });
-    });
+
+      return res.json({ message: 'Verification code sent successfully' });
+    } catch (err) {
+      console.error('[SMTP SEND ERROR]', {
+        name: err?.name,
+        code: err?.code,
+        command: err?.command,
+        response: err?.response,
+        responseCode: err?.responseCode,
+        message: err?.message,
+      });
+      return res.status(500).json({
+        error: 'Failed to send verification code',
+        code: err?.code || 'SEND_FAIL',
+      });
+    }
   } catch (error) {
     console.error('Error in sending verification code:', error);
     res.status(500).json({ error: 'Server error while sending verification code' });
@@ -206,45 +247,6 @@ app.post('/api/verify-reset-code', async (req, res) => {
     res.status(500).json({ error: 'Server error while verifying code' });
   }
 });
-
-async function bootstrap() {
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 5000,
-    });
-    console.log('MongoDB connected');
-
-    console.log('Attempting to verify SMTP connection...');
-    try {
-      await transporter.verify();
-      console.log('✅ SMTP server is ready to take messages');
-    } catch (error) {
-      console.error('❌ SMTP connection error:', error);
-    }
-
-    cron.schedule('0 0 * * 4', async () => {
-      try {
-        console.log('추천 수 초기화 및 추천 수 0인 댓글 삭제 작업 시작');
-        await Comment.deleteMany({ likes: 0 });
-        await Comment.updateMany({}, { likes: 0 });
-        await Like.deleteMany({});
-        console.log('추천 수 초기화 완료 및 추천 수 0인 댓글 삭제 완료');
-      } catch (error) {
-        console.error('추천 수 초기화 및 댓글 삭제 중 오류 발생:', error);
-      }
-    });
-
-    app.listen(PORT, () => console.log(`✅ Server running → http://localhost:${PORT}`));
-  } catch (err) {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
-  }
-
-  mongoose.connection.on('error', (e) => console.error('Mongo connection error:', e));
-  mongoose.connection.on('disconnected', () => console.warn('Mongo disconnected'));
-}
-
-bootstrap();
 
 // 로그인
 app.post('/api/login', async (req, res) => {
@@ -327,7 +329,6 @@ app.post('/api/check-nickname', async (req, res) => {
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
-
 
 // ====== 댓글 관련 ======
 app.post('/api/comments', authenticateToken, async (req, res) => {
@@ -575,6 +576,34 @@ app.get('/api/user-info', authenticateToken, (req, res) => {
   res.json({ username: req.user.username, nickname: req.user.nickname });
 });
 
+// ===== Debug: ENV/SMTP 진단 라우트 =====
+app.get('/debug/health/env', (_req, res) => {
+  res.json({
+    GMAIL_USER: process.env.GMAIL_USER || null,
+    GMAIL_APP_PASSWORD: process.env.GMAIL_APP_PASSWORD ? '***' : null,
+    SMTP_HOST: SMTP_HOST,
+    SMTP_PORT: SMTP_PORT,
+    SMTP_SECURE: SMTP_SECURE,
+  });
+});
+
+app.get('/debug/health/email', async (_req, res) => {
+  try {
+    const ok = await transporter.verify();
+    return res.json({ ok });
+  } catch (err) {
+    console.error('[SMTP VERIFY ERROR]', {
+      name: err?.name,
+      code: err?.code,
+      command: err?.command,
+      response: err?.response,
+      responseCode: err?.responseCode,
+      message: err?.message,
+    });
+    return res.status(500).json({ ok: false, code: err?.code || 'VERIFY_FAIL' });
+  }
+});
+
 // ====== 페이지 라우팅 (특정 파일) ======
 app.get('/reset-password/:token', (req, res) => {
   res.sendFile(path.join(PAGES_DIR, 'reset-password.html'));
@@ -590,7 +619,6 @@ app.get('/chat.html', (req, res) => {
 app.get('/', (_req, res) => {
   res.sendFile(path.join(PAGES_DIR, 'index.html'));
 });
-
 
 app.get(/^\/(?!api|assets|health|pages)(.*)$/, (req, res, next) => {
   let rel = req.path.replace(/^\//, ''); // '' | 'login' | 'auth/login'
@@ -636,11 +664,20 @@ async function bootstrap() {
     });
     console.log('MongoDB connected');
 
-    // SMTP 확인
-    transporter.verify((error) => {
-      if (error) console.log('SMTP connection error:', error);
-      else console.log('SMTP server is ready to take messages');
-    });
+    // SMTP 확인(상세 로그)
+    try {
+      const ok = await transporter.verify();
+      console.log('SMTP server is ready to take messages:', ok);
+    } catch (error) {
+      console.error('SMTP connection error (verify):', {
+        name: error?.name,
+        code: error?.code,
+        command: error?.command,
+        response: error?.response,
+        responseCode: error?.responseCode,
+        message: error?.message,
+      });
+    }
 
     // 주기 작업: 추천/댓글 정리 (연결 이후 등록)
     cron.schedule('0 0 * * 4', async () => {
